@@ -1,5 +1,5 @@
 /**
- * Vision Extraction Service using Google Gemini 3.8 Flash API
+ * Vision Extraction Service using Google Gemini API with Automatic Fallback
  */
 
 export const MARK_SHEET_SCHEMA = {
@@ -40,17 +40,30 @@ export const MARK_SHEET_SCHEMA = {
   required: ["courseCode", "records"]
 };
 
+// Resilient cascade of verified active multimodal models
+const MODEL_CANDIDATES = [
+  "gemini-3.5-flash-lite",
+  "gemini-3.5-flash",
+  "gemini-3.8-flash",
+  "gemini-flash-latest"
+];
+
 /**
- * Extracts tabular marksheet data from a base64 image using Gemini 3.8 Flash
+ * Extracts tabular marksheet data from base64 image with automatic model fallback
  * @param {string} base64Data Base64 image data URL or raw base64 string
  * @param {string} apiKey Gemini API Key
  * @param {number} pageNum Optional page index
- * @param {string} model Model identifier (defaults to gemini-3.8-flash)
+ * @param {Function} onStatusUpdate Optional progress status callback
  * @returns {Promise<Object>} Extracted JSON
  */
-export async function extractMarksheetWithGemini(base64Data, apiKey, pageNum = 1, model = "gemini-3.8-flash") {
+export async function extractMarksheetWithGemini(
+  base64Data,
+  apiKey,
+  pageNum = 1,
+  onStatusUpdate = null
+) {
   if (!apiKey) {
-    throw new Error("Missing Gemini API Key. Please provide an API key in Settings.");
+    throw new Error("Missing Gemini API Key. Please click the Settings gear icon to provide your API key.");
   }
 
   // Strip data:image/...;base64, prefix if present
@@ -64,13 +77,11 @@ export async function extractMarksheetWithGemini(base64Data, apiKey, pageNum = 1
     if (match) mimeType = match[1];
   }
 
-  const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
-
-  const prompt = `You are a high-precision academic OCR specialist for university examination mark sheets.
-Extract all handwritten numbers and printed header metadata from this scanned exam mark sheet page (Page ${pageNum}).
+  const prompt = `You are an academic OCR specialist for university exam mark sheets.
+Extract all handwritten numbers and printed header metadata from this scanned mark sheet (Page ${pageNum}).
 
 Guidelines:
-1. Extract Header Information:
+1. Header Information:
    - University name (e.g. BANGAMATA SHEIKH FOJILATUNNESA MUJIB SCIENCE & TECHNOLOGY UNIVERSITY)
    - Academic Session (e.g. 2022-2023)
    - Year & Semester (e.g. 2nd Year 1st Semester)
@@ -78,14 +89,13 @@ Guidelines:
    - Department (e.g. EEE)
    - Course Code (e.g. EEE 2121)
    - Course Title (e.g. Electronic Device and Circuit II)
-   - Examiner Name & designation from seal/signature if present (e.g. Shuvo Dev, Lecturer).
+   - Examiner details if visible.
 
-2. Extract Mark Sheet Table Rows:
-   - For every student row, read 'Code no.' (usually a 6-digit number like 321030).
-   - Read obtained marks against Question Numbers 1 through 10 (q1 through q10). If a question is blank or has a dash ('-'), output empty string ("").
-   - Read 'Total Mark' column exactly as handwritten by the examiner.
-   - Do NOT omit rows. Include all rows that have a Code number or marks. If a row has zeros across (e.g. absent 0 0 0 0 -> total 00), record it with 0.
-   - Return valid JSON strictly adhering to the schema.`;
+2. Student Rows:
+   - For every student row, extract 'Code no.' (e.g. 321030).
+   - Read obtained marks for Questions 1 to 10 (q1 through q10). Blank questions should be "".
+   - Read 'Total Mark' as handwritten.
+   - Return valid JSON matching the schema.`;
 
   const payload = {
     contents: [
@@ -107,39 +117,65 @@ Guidelines:
     }
   };
 
-  const response = await fetch(endpoint, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify(payload)
-  });
+  let lastError = null;
 
-  if (!response.ok) {
-    const errorText = await response.text();
-    let msg = `Gemini API error (${response.status}): ${response.statusText}`;
+  // Try each model candidate until success
+  for (const model of MODEL_CANDIDATES) {
     try {
-      const errJson = JSON.parse(errorText);
-      if (errJson.error && errJson.error.message) {
-        msg = errJson.error.message;
+      if (onStatusUpdate) {
+        onStatusUpdate(`Analyzing with model: ${model}...`);
       }
-    } catch (_) {
-      // ignore
+
+      const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+      
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 28000); // 28s timeout per candidate
+
+      const response = await fetch(endpoint, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify(payload),
+        signal: controller.signal
+      });
+
+      clearTimeout(timeoutId);
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        let errorMsg = `HTTP ${response.status} (${response.statusText})`;
+        try {
+          const errJson = JSON.parse(errorText);
+          if (errJson.error && errJson.error.message) {
+            errorMsg = errJson.error.message;
+          }
+        } catch (_) {}
+
+        console.warn(`[${model}] failed:`, errorMsg);
+        lastError = new Error(`[${model}] ${errorMsg}`);
+        continue; // Try next model candidate
+      }
+
+      const result = await response.json();
+      const textOutput = result.candidates?.[0]?.content?.parts?.[0]?.text;
+
+      if (!textOutput) {
+        throw new Error(`Empty response returned by ${model}`);
+      }
+
+      const parsed = JSON.parse(textOutput);
+      return parsed; // Successfully extracted!
+
+    } catch (err) {
+      console.warn(`[${model}] error:`, err.message);
+      lastError = err;
+      // Continue to next fallback model
     }
-    throw new Error(msg);
   }
 
-  const result = await response.json();
-  const textOutput = result.candidates?.[0]?.content?.parts?.[0]?.text;
-
-  if (!textOutput) {
-    throw new Error("No data returned by Gemini Vision model.");
-  }
-
-  try {
-    const parsed = JSON.parse(textOutput);
-    return parsed;
-  } catch (err) {
-    throw new Error("Failed to parse AI output into valid JSON: " + err.message);
-  }
+  // If all candidates failed
+  throw new Error(
+    `Extraction failed across all available Gemini models. Last error: ${lastError?.message || 'Network timeout'}. Please verify your API key and network connection.`
+  );
 }

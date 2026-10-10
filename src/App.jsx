@@ -26,7 +26,7 @@ export default function App() {
   // Mobile tab state: 'doc' or 'table'
   const [mobileTab, setMobileTab] = useState('doc');
 
-  // Gemini API Key state
+  // Gemini API Key state - loaded securely from browser storage or Netlify environment
   const [apiKey, setApiKey] = useState(() => {
     return localStorage.getItem('gemini_api_key') || import.meta.env.VITE_GEMINI_API_KEY || '';
   });
@@ -36,7 +36,7 @@ export default function App() {
   const [pages, setPages] = useState([]);
   const [currentPageIndex, setCurrentPageIndex] = useState(0);
 
-  // Academic Marksheet state (Initialized with EEE 2121 ground truth by default for instant delight!)
+  // Academic Marksheet state (Initialized with clean zeroed template)
   const [metadata, setMetadata] = useState(sampleEEE2121.metadata);
   const [records, setRecords] = useState(sampleEEE2121.records);
 
@@ -100,11 +100,11 @@ export default function App() {
     }
   };
 
-  // Load EEE 2121 Sample Demo
+  // Reset Marksheet to clean template with all 0s
   const handleLoadSampleDemo = () => {
     setMetadata(sampleEEE2121.metadata);
     setRecords(sampleEEE2121.records);
-    showToast('Loaded EEE 2121 Sample Exam Data (30 Students)', 'success');
+    showToast('Reset mark sheet table with all 0 marks', 'success');
   };
 
   // Trigger Gemini Vision AI OCR on current page
@@ -124,13 +124,13 @@ export default function App() {
 
     try {
       setIsProcessing(true);
-      setProcessingStatus(`Gemini 3.8 Flash analyzing Page ${currentPageIndex + 1}...`);
+      setProcessingStatus(`Connecting to Gemini Vision API (Page ${currentPageIndex + 1})...`);
 
       const extracted = await extractMarksheetWithGemini(
         activePage.dataUrl,
         apiKey,
         currentPageIndex + 1,
-        "gemini-3.8-flash"
+        (msg) => setProcessingStatus(msg)
       );
 
       // Merge metadata if present
@@ -241,11 +241,11 @@ export default function App() {
           <button
             className="btn btn-secondary"
             onClick={handleLoadSampleDemo}
-            title="Reload EEE 2121 ground truth sample data"
+            title="Reset mark sheet to clean 0 marks template"
             style={{ fontSize: '0.82rem', padding: '0.45rem 0.75rem' }}
           >
-            <BookOpen size={14} />
-            <span className="hide-mobile">EEE 2121 Demo</span>
+            <RotateCcw size={14} />
+            <span className="hide-mobile">Reset to 0s</span>
           </button>
 
           <button
