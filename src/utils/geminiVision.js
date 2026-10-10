@@ -1,5 +1,5 @@
 /**
- * Vision Extraction Service using Google Gemini 2.0 Flash API
+ * Vision Extraction Service using Google Gemini 3.8 Flash API
  */
 
 export const MARK_SHEET_SCHEMA = {
@@ -41,13 +41,14 @@ export const MARK_SHEET_SCHEMA = {
 };
 
 /**
- * Extracts tabular marksheet data from a base64 image using Gemini 2.0 Flash
+ * Extracts tabular marksheet data from a base64 image using Gemini 3.8 Flash
  * @param {string} base64Data Base64 image data URL or raw base64 string
  * @param {string} apiKey Gemini API Key
  * @param {number} pageNum Optional page index
+ * @param {string} model Model identifier (defaults to gemini-3.8-flash)
  * @returns {Promise<Object>} Extracted JSON
  */
-export async function extractMarksheetWithGemini(base64Data, apiKey, pageNum = 1) {
+export async function extractMarksheetWithGemini(base64Data, apiKey, pageNum = 1, model = "gemini-3.8-flash") {
   if (!apiKey) {
     throw new Error("Missing Gemini API Key. Please provide an API key in Settings.");
   }
@@ -63,7 +64,7 @@ export async function extractMarksheetWithGemini(base64Data, apiKey, pageNum = 1
     if (match) mimeType = match[1];
   }
 
-  const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
+  const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
 
   const prompt = `You are a high-precision academic OCR specialist for university examination mark sheets.
 Extract all handwritten numbers and printed header metadata from this scanned exam mark sheet page (Page ${pageNum}).

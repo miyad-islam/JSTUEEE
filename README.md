@@ -1,6 +1,6 @@
 # GradeDigitizer AI — University Mark Sheet to Excel Digitizer
 
-A modern, dual-responsive web application designed for university faculty to upload handwritten exam detailed mark sheets (PDFs scanned with CamScanner or mobile photos like `EEE 2121 SEF.pdf`), automatically digitize student marks using Gemini 2.0 Flash Vision AI, verify calculations with automated checksum indicators, and export formatted Microsoft Excel (`.xlsx`) workbooks.
+A modern, dual-responsive web application designed for university faculty to upload handwritten exam detailed mark sheets (PDFs scanned with CamScanner or mobile photos like `EEE 2121 SEF.pdf`), automatically digitize student marks using Gemini 3.8 Flash Vision AI, verify calculations with automated checksum indicators, and export formatted Microsoft Excel (`.xlsx`) workbooks.
 
 Deployed ready for **Netlify**.
 
@@ -16,7 +16,7 @@ Deployed ready for **Netlify**.
    - Image contrast enhancement toggle to boost faint handwriting.
    - Zoom (50%–300%), 90° rotation, and smooth mouse/touch pan gestures.
 3. **High-Precision Multimodal Vision AI**:
-   - Integrated with Google Gemini 2.0 Flash REST API with strict JSON Schema output.
+   - Integrated with Google Gemini 3.8 Flash REST API with strict JSON Schema output.
    - Accurately transcribes handwritten student codes (`321030`–`321059`), individual question scores (`Q1`–`Q10`), and examiner stated totals.
 4. **Real-Time Arithmetic Verification & Discrepancy Highlighting**:
    - Automatically compares `sum(Q1..Q10)` against the examiner's stated total mark.

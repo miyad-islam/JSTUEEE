@@ -124,12 +124,13 @@ export default function App() {
 
     try {
       setIsProcessing(true);
-      setProcessingStatus(`Gemini 2.0 Flash analyzing Page ${currentPageIndex + 1}...`);
+      setProcessingStatus(`Gemini 3.8 Flash analyzing Page ${currentPageIndex + 1}...`);
 
       const extracted = await extractMarksheetWithGemini(
         activePage.dataUrl,
         apiKey,
-        currentPageIndex + 1
+        currentPageIndex + 1,
+        "gemini-3.8-flash"
       );
 
       // Merge metadata if present
