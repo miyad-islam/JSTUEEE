@@ -6,10 +6,10 @@ import {
   RotateCw,
   Maximize2,
   FileText,
-  Image as ImageIcon,
   Sliders,
-  CheckCircle,
-  AlertCircle
+  Layers,
+  Sparkles,
+  RefreshCw
 } from 'lucide-react';
 
 export default function DocumentViewer({
@@ -18,6 +18,7 @@ export default function DocumentViewer({
   onPageChange,
   onFileUpload,
   onTriggerOcr,
+  onTriggerBatchOcr,
   isProcessing,
   processingStatus
 }) {
@@ -47,7 +48,7 @@ export default function DocumentViewer({
 
   // Mouse drag pan
   const handleMouseDown = (e) => {
-    if (e.button !== 0) return; // Left click only
+    if (e.button !== 0) return;
     setIsDragging(true);
     dragStartRef.current = { x: e.clientX - pan.x, y: e.clientY - pan.y };
   };
@@ -89,8 +90,8 @@ export default function DocumentViewer({
 
   const handleDrop = (e) => {
     e.preventDefault();
-    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-      onFileUpload(e.dataTransfer.files[0]);
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      onFileUpload(e.dataTransfer.files);
     }
   };
 
@@ -99,22 +100,23 @@ export default function DocumentViewer({
       <div className="pane-header">
         <div className="pane-title-group">
           <FileText size={18} color="#818cf8" />
-          <h2 className="pane-title">Original Scanned Document</h2>
-        </div>
-        <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+          <h2 className="pane-title">Scanned Mark Sheet</h2>
           {pages.length > 0 && (
-            <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+            <span className="brand-badge" style={{ textTransform: 'none' }}>
               Page {currentPageIndex + 1} of {pages.length}
             </span>
           )}
+        </div>
+        <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
           <label className="btn btn-secondary" style={{ padding: '0.4rem 0.75rem', fontSize: '0.8rem' }}>
             <Upload size={14} />
-            <span>Upload New</span>
+            <span>Upload File(s)</span>
             <input
               type="file"
+              multiple
               accept=".pdf,image/png,image/jpeg,image/webp"
               style={{ display: 'none' }}
-              onChange={(e) => e.target.files?.[0] && onFileUpload(e.target.files[0])}
+              onChange={(e) => e.target.files && onFileUpload(e.target.files)}
             />
           </label>
         </div>
@@ -128,8 +130,9 @@ export default function DocumentViewer({
           onClick={() => {
             const input = document.createElement('input');
             input.type = 'file';
+            input.multiple = true;
             input.accept = '.pdf,image/png,image/jpeg,image/webp';
-            input.onchange = (e) => e.target.files?.[0] && onFileUpload(e.target.files[0]);
+            input.onchange = (e) => e.target.files && onFileUpload(e.target.files);
             input.click();
           }}
         >
@@ -137,11 +140,11 @@ export default function DocumentViewer({
             <Upload size={28} />
           </div>
           <div className="dropzone-text">
-            <h3>Drop EEE 2121 Mark Sheet PDF or Image</h3>
-            <p>Supports scanned PDFs (CamScanner) and JPG/PNG photos</p>
+            <h3>Drop Mark Sheet PDF or Multiple Images</h3>
+            <p>Select multi-page PDFs or one/more photos from camera or gallery</p>
           </div>
           <button type="button" className="btn btn-primary" style={{ marginTop: '0.5rem' }}>
-            Browse Files from Device
+            Browse Device Files (PDF / Images)
           </button>
         </div>
       ) : (
@@ -184,7 +187,7 @@ export default function DocumentViewer({
               <button
                 className={`btn btn-icon ${contrastBoost ? 'active' : ''}`}
                 onClick={() => setContrastBoost(!contrastBoost)}
-                title="Toggle Handwriting Contrast Boost"
+                title="Handwriting Contrast Boost"
                 aria-label="Contrast Boost"
                 style={{
                   background: contrastBoost ? 'rgba(99, 102, 241, 0.3)' : undefined,
@@ -198,24 +201,31 @@ export default function DocumentViewer({
               </span>
             </div>
 
-            {/* OCR Extract trigger button */}
-            <button
-              className="btn btn-primary"
-              onClick={onTriggerOcr}
-              disabled={isProcessing}
-              style={{ padding: '0.45rem 0.9rem', fontSize: '0.82rem' }}
-            >
-              {isProcessing ? (
-                <>
-                  <span className="spinner" />
-                  <span>Processing Page {currentPageIndex + 1}...</span>
-                </>
-              ) : (
-                <>
-                  <span>✨ Extract Marks with AI</span>
-                </>
+            {/* OCR Extract trigger buttons */}
+            <div style={{ display: 'flex', gap: '0.5rem' }}>
+              {pages.length > 1 && (
+                <button
+                  className="btn btn-primary"
+                  onClick={onTriggerBatchOcr}
+                  disabled={isProcessing}
+                  title="Extract all pages and combine students into one sheet"
+                  style={{ padding: '0.45rem 0.85rem', fontSize: '0.8rem', background: 'linear-gradient(135deg, #8b5cf6 0%, #ec4899 100%)' }}
+                >
+                  <Layers size={14} />
+                  <span>Batch Extract All ({pages.length}p)</span>
+                </button>
               )}
-            </button>
+
+              <button
+                className="btn btn-secondary"
+                onClick={onTriggerOcr}
+                disabled={isProcessing}
+                style={{ padding: '0.45rem 0.85rem', fontSize: '0.8rem' }}
+              >
+                <Sparkles size={14} />
+                <span>{pages.length > 1 ? `Extract Page ${currentPageIndex + 1}` : 'Extract with AI'}</span>
+              </button>
+            </div>
           </div>
 
           {/* Processing Banner */}
@@ -224,16 +234,16 @@ export default function DocumentViewer({
               style={{
                 background: 'rgba(99, 102, 241, 0.15)',
                 borderBottom: '1px solid var(--border-accent)',
-                padding: '0.5rem 1rem',
-                fontSize: '0.82rem',
+                padding: '0.6rem 1rem',
+                fontSize: '0.85rem',
                 color: '#a5b4fc',
                 display: 'flex',
                 alignItems: 'center',
-                gap: '0.5rem'
+                gap: '0.65rem'
               }}
             >
-              <span className="pulse-dot" />
-              <span>{processingStatus || 'Gemini Vision analyzing handwritten marksheet...'}</span>
+              <RefreshCw size={15} className="spin-icon" />
+              <span>{processingStatus || 'Gemini Vision analyzing handwritten marks...'}</span>
             </div>
           )}
 

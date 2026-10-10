@@ -10,7 +10,9 @@ import {
   RotateCcw,
   BookOpen,
   CheckCircle2,
-  AlertCircle
+  AlertCircle,
+  Trash2,
+  Layers
 } from 'lucide-react';
 import DocumentViewer from './components/DocumentViewer';
 import GradeTable from './components/GradeTable';
@@ -18,6 +20,20 @@ import ApiKeyModal from './components/ApiKeyModal';
 import { sampleEEE2121 } from './data/sampleEEE2121';
 import { convertPdfToImages } from './utils/pdfProcessor';
 import { extractMarksheetWithGemini } from './utils/geminiVision';
+import { normalizeMarksheetResponse } from './utils/marksheetNormalizer';
+
+const BLANK_METADATA = {
+  university: "",
+  academicSession: "",
+  yearSemester: "",
+  examination: "",
+  department: "",
+  courseCode: "",
+  courseTitle: "",
+  examinerName: "",
+  examinerDesignation: "",
+  signDate: ""
+};
 
 export default function App() {
   // Theme state
@@ -32,11 +48,11 @@ export default function App() {
   });
   const [isKeyModalOpen, setIsKeyModalOpen] = useState(false);
 
-  // Document state
+  // Document pages state
   const [pages, setPages] = useState([]);
   const [currentPageIndex, setCurrentPageIndex] = useState(0);
 
-  // Academic Marksheet state (Initialized with clean zeroed template)
+  // Academic Marksheet metadata & student rows
   const [metadata, setMetadata] = useState(sampleEEE2121.metadata);
   const [records, setRecords] = useState(sampleEEE2121.records);
 
@@ -57,57 +73,92 @@ export default function App() {
 
   const showToast = (text, type = 'info') => {
     setToastMessage({ text, type });
-    setTimeout(() => setToastMessage(null), 3500);
+    setTimeout(() => setToastMessage(null), 4000);
   };
 
   const handleSaveApiKey = (newKey) => {
     setApiKey(newKey);
     localStorage.setItem('gemini_api_key', newKey);
-    showToast('Gemini API Key updated successfully', 'success');
+    showToast('Gemini API Key saved successfully', 'success');
   };
 
-  // File Upload Handler (PDF or Image)
-  const handleFileUpload = async (file) => {
+  // Helper to read single image file to dataUrl
+  const readFileAsDataUrl = (file) => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = (e) => resolve(e.target.result);
+      reader.onerror = (err) => reject(err);
+      reader.readAsDataURL(file);
+    });
+  };
+
+  // Multi-File Upload Handler (Supports multiple PDFs, images, or mixed)
+  const handleFileUpload = async (fileInput) => {
     try {
       setIsProcessing(true);
-      setProcessingStatus(`Loading file: ${file.name}...`);
+      const fileList = fileInput instanceof FileList ? Array.from(fileInput) : (Array.isArray(fileInput) ? fileInput : [fileInput]);
+      
+      if (fileList.length === 0) return;
 
-      if (file.type === 'application/pdf' || file.name.endsWith('.pdf')) {
-        setProcessingStatus('Rendering PDF pages via Canvas...');
-        const renderedPages = await convertPdfToImages(file, 2.0);
-        setPages(renderedPages);
+      setProcessingStatus(`Loading ${fileList.length} file(s)...`);
+      const newPages = [];
+
+      for (let i = 0; i < fileList.length; i++) {
+        const file = fileList[i];
+        if (file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')) {
+          setProcessingStatus(`Rendering PDF: ${file.name}...`);
+          const rendered = await convertPdfToImages(file, 2.0);
+          rendered.forEach((p) => {
+            newPages.push({
+              pageNumber: newPages.length + 1,
+              dataUrl: p.dataUrl,
+              sourceFile: file.name
+            });
+          });
+        } else if (file.type.startsWith('image/') || /\.(png|jpe?g|webp)$/i.test(file.name)) {
+          setProcessingStatus(`Loading image: ${file.name}...`);
+          const dataUrl = await readFileAsDataUrl(file);
+          newPages.push({
+            pageNumber: newPages.length + 1,
+            dataUrl,
+            sourceFile: file.name
+          });
+        }
+      }
+
+      if (newPages.length > 0) {
+        setPages(newPages);
         setCurrentPageIndex(0);
-        showToast(`Loaded ${renderedPages.length} PDF page(s)`, 'success');
-      } else if (file.type.startsWith('image/')) {
-        // Read single image
-        const reader = new FileReader();
-        reader.onload = (e) => {
-          const dataUrl = e.target.result;
-          setPages([{ pageNumber: 1, dataUrl }]);
-          setCurrentPageIndex(0);
-          showToast('Image loaded successfully', 'success');
-        };
-        reader.readAsDataURL(file);
+        showToast(`Loaded ${newPages.length} mark sheet page(s) ready for extraction`, 'success');
       } else {
-        showToast('Please upload a PDF or image file (JPG/PNG/WEBP)', 'error');
+        showToast('Please upload a valid PDF or image file (PNG/JPG/WEBP)', 'error');
       }
     } catch (err) {
       console.error(err);
-      showToast('Error loading file: ' + err.message, 'error');
+      showToast('Error loading file(s): ' + err.message, 'error');
     } finally {
       setIsProcessing(false);
       setProcessingStatus('');
     }
   };
 
-  // Reset Marksheet to clean template with all 0s
-  const handleLoadSampleDemo = () => {
-    setMetadata(sampleEEE2121.metadata);
-    setRecords(sampleEEE2121.records);
-    showToast('Reset mark sheet table with all 0 marks', 'success');
+  // Complete Reset: Clears ALL names, info, marks, and uploaded documents
+  const handleResetAll = () => {
+    setMetadata(BLANK_METADATA);
+    setRecords([]);
+    setPages([]);
+    setCurrentPageIndex(0);
+    showToast('Reset complete: All headers, marks, and documents cleared', 'success');
   };
 
-  // Trigger Gemini Vision AI OCR on current page
+  // Load blank 0s template
+  const handleLoadZeroTemplate = () => {
+    setMetadata(sampleEEE2121.metadata);
+    setRecords(sampleEEE2121.records);
+    showToast('Loaded 30 student template with zero marks', 'success');
+  };
+
+  // Extract Single Active Page with AI
   const handleTriggerOcr = async () => {
     if (pages.length === 0) {
       showToast('Please upload a PDF or image first', 'error');
@@ -124,68 +175,115 @@ export default function App() {
 
     try {
       setIsProcessing(true);
-      setProcessingStatus(`Connecting to Gemini Vision API (Page ${currentPageIndex + 1})...`);
+      setProcessingStatus(`Analyzing Page ${currentPageIndex + 1}...`);
 
-      const extracted = await extractMarksheetWithGemini(
+      const rawAiResponse = await extractMarksheetWithGemini(
         activePage.dataUrl,
         apiKey,
         currentPageIndex + 1,
         (msg) => setProcessingStatus(msg)
       );
 
-      // Merge metadata if present
-      if (extracted.courseCode || extracted.university) {
+      // Normalize any AI response variation
+      const normalized = normalizeMarksheetResponse(rawAiResponse, currentPageIndex + 1);
+
+      // Update metadata if found
+      if (Object.keys(normalized.metadata).length > 0) {
         setMetadata((prev) => ({
           ...prev,
-          university: extracted.university || prev.university,
-          academicSession: extracted.academicSession || prev.academicSession,
-          yearSemester: extracted.yearSemester || prev.yearSemester,
-          examination: extracted.examination || prev.examination,
-          department: extracted.department || prev.department,
-          courseCode: extracted.courseCode || prev.courseCode,
-          courseTitle: extracted.courseTitle || prev.courseTitle,
-          examinerName: extracted.examinerName || prev.examinerName,
-          examinerDesignation: extracted.examinerDesignation || prev.examinerDesignation
+          ...normalized.metadata
         }));
       }
 
       // Merge records
-      if (Array.isArray(extracted.records) && extracted.records.length > 0) {
-        const formattedRecords = extracted.records.map((r, i) => ({
-          id: `row-page${currentPageIndex + 1}-${i}-${Date.now()}`,
-          codeNo: r.codeNo || '',
-          q1: r.q1 || '',
-          q2: r.q2 || '',
-          q3: r.q3 || '',
-          q4: r.q4 || '',
-          q5: r.q5 || '',
-          q6: r.q6 || '',
-          q7: r.q7 || '',
-          q8: r.q8 || '',
-          q9: r.q9 || '',
-          q10: r.q10 || '',
-          totalMark: r.totalMark || '',
-          page: currentPageIndex + 1
-        }));
-
+      if (normalized.records.length > 0) {
         setRecords((prev) => {
-          // If first page extraction or empty, replace; else append non-duplicates
-          if (currentPageIndex === 0) return formattedRecords;
-          const existingCodes = new Set(prev.map((p) => p.codeNo));
-          const newRows = formattedRecords.filter((nr) => !existingCodes.has(nr.codeNo));
-          return [...prev, ...newRows];
+          // If previous records were empty or page 1, overwrite; else merge by code
+          if (prev.length === 0 || currentPageIndex === 0) {
+            return normalized.records;
+          }
+          const existingCodes = new Set(prev.map((r) => r.codeNo));
+          const additions = normalized.records.filter((nr) => !existingCodes.has(nr.codeNo));
+          return [...prev, ...additions];
         });
 
         showToast(
-          `Extracted ${formattedRecords.length} student marks from Page ${currentPageIndex + 1}`,
+          `Extracted ${normalized.records.length} student marks from Page ${currentPageIndex + 1}!`,
           'success'
         );
-        // On mobile, auto-switch to table view to see results
         setMobileTab('table');
+      } else {
+        showToast('AI processed image but could not identify student rows. Please verify clarity.', 'warning');
       }
     } catch (err) {
       console.error(err);
       showToast(err.message, 'error');
+    } finally {
+      setIsProcessing(false);
+      setProcessingStatus('');
+    }
+  };
+
+  // Batch Extract All Pages sequentially
+  const handleTriggerBatchOcr = async () => {
+    if (pages.length === 0) {
+      showToast('Please upload pages first', 'error');
+      return;
+    }
+
+    if (!apiKey) {
+      setIsKeyModalOpen(true);
+      return;
+    }
+
+    try {
+      setIsProcessing(true);
+      let combinedRecords = [];
+      let latestMetadata = {};
+
+      for (let i = 0; i < pages.length; i++) {
+        setProcessingStatus(`Batch processing Page ${i + 1} of ${pages.length}...`);
+        setCurrentPageIndex(i);
+
+        const raw = await extractMarksheetWithGemini(
+          pages[i].dataUrl,
+          apiKey,
+          i + 1,
+          (msg) => setProcessingStatus(`Page ${i + 1}/${pages.length}: ${msg}`)
+        );
+
+        const normalized = normalizeMarksheetResponse(raw, i + 1);
+
+        if (Object.keys(normalized.metadata).length > 0) {
+          latestMetadata = { ...latestMetadata, ...normalized.metadata };
+        }
+
+        if (normalized.records.length > 0) {
+          // Deduplicate
+          const existingCodes = new Set(combinedRecords.map((r) => r.codeNo));
+          const newRows = normalized.records.filter((nr) => !existingCodes.has(nr.codeNo));
+          combinedRecords = [...combinedRecords, ...newRows];
+        }
+      }
+
+      // Apply all batch results
+      if (Object.keys(latestMetadata).length > 0) {
+        setMetadata((prev) => ({ ...prev, ...latestMetadata }));
+      }
+
+      if (combinedRecords.length > 0) {
+        setRecords(combinedRecords);
+        showToast(
+          `Batch OCR Complete: Extracted ${combinedRecords.length} students across ${pages.length} pages!`,
+          'success'
+        );
+        setMobileTab('table');
+      } else {
+        showToast('Batch processing finished but no student rows found', 'warning');
+      }
+    } catch (err) {
+      console.error(err);
+      showToast('Batch extraction stopped: ' + err.message, 'error');
     } finally {
       setIsProcessing(false);
       setProcessingStatus('');
@@ -234,18 +332,28 @@ export default function App() {
           <div>
             <h1 className="brand-title">GradeDigitizer AI</h1>
           </div>
-          <span className="brand-badge">EEE 2121 Ready</span>
+          <span className="brand-badge">Multimodal OCR</span>
         </div>
 
         <div className="nav-actions">
           <button
             className="btn btn-secondary"
-            onClick={handleLoadSampleDemo}
-            title="Reset mark sheet to clean 0 marks template"
+            onClick={handleResetAll}
+            title="Clear all names, data, and uploads"
+            style={{ fontSize: '0.82rem', padding: '0.45rem 0.75rem', color: '#f87171' }}
+          >
+            <Trash2 size={14} />
+            <span className="hide-mobile">Reset All</span>
+          </button>
+
+          <button
+            className="btn btn-secondary"
+            onClick={handleLoadZeroTemplate}
+            title="Load blank template table"
             style={{ fontSize: '0.82rem', padding: '0.45rem 0.75rem' }}
           >
             <RotateCcw size={14} />
-            <span className="hide-mobile">Reset to 0s</span>
+            <span className="hide-mobile">Template 0s</span>
           </button>
 
           <button
@@ -283,7 +391,7 @@ export default function App() {
           onClick={() => setMobileTab('table')}
         >
           <FileSpreadsheet size={16} />
-          <span>Marks Table</span>
+          <span>Marks Table ({records.length})</span>
           {discrepancyCount > 0 ? (
             <span style={{ background: 'var(--danger)', color: '#fff', fontSize: '0.7rem', padding: '0.1rem 0.4rem', borderRadius: '999px' }}>
               {discrepancyCount}
@@ -328,6 +436,7 @@ export default function App() {
           onPageChange={setCurrentPageIndex}
           onFileUpload={handleFileUpload}
           onTriggerOcr={handleTriggerOcr}
+          onTriggerBatchOcr={handleTriggerBatchOcr}
           isProcessing={isProcessing}
           processingStatus={processingStatus}
         />
